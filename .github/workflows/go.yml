@@ -1,0 +1,15 @@
+# Run on every push/PR. Keeps a green "CI" badge; catches races and test regressions early.
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go test (race)
+        run: go test -race ./...
