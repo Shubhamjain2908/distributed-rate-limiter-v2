@@ -25,15 +25,17 @@ type primaryThenLocal struct {
 }
 
 func (p *primaryThenLocal) Allow(ctx context.Context, clientID string, cost int) (limiter.LimitResult, error) {
-	if !p.b.AllowRequest() {
+	r := p.b.Route()
+	if !r.ToPrimary {
+		// Open: only local, zero Redis. Half-Open: non-probe goroutines also use local.
 		return p.local.Allow(ctx, clientID, cost)
 	}
+	start := time.Now()
 	res, err := p.primary.Allow(ctx, clientID, cost)
+	p.b.FinishAfterPrimary(r.IsProbe, err == nil, time.Since(start))
 	if err != nil {
-		p.b.OnFailure()
 		return p.local.Allow(ctx, clientID, cost)
 	}
-	p.b.OnSuccess()
 	return res, nil
 }
 
@@ -67,7 +69,7 @@ func main() {
 				log.Println("using Redis (EVALSHA) as primary, local in-memory as fallback, circuit breaker around Redis")
 				loc := fallback.NewLocalLimiter(burst, perSec)
 				lim = &primaryThenLocal{
-					b:       circuitbreaker.New(3, 5*time.Second),
+					b:       circuitbreaker.NewWithDefaults(),
 					primary: rl,
 					local:   loc,
 				}
