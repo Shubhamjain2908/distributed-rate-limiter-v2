@@ -1,0 +1,188 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Rate limiter SLO: decisions, Redis p99, circuit, fallback, error budget, promhttp. Import and set the Prometheus datasource.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (result, algorithm) (rate(ratelimiter_decisions_total[5m]))",
+          "legendFormat": "{{result}} / {{algorithm}}",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO: decisions (allowed / rejected / fallback × algorithm)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.002 },
+              { "color": "red", "value": 0.01 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum(rate(ratelimiter_redis_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99 redis",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO: Redis p99 (target < 2ms; alert if > 10ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "unit": "none" } },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "ratelimiter_circuit_state",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO: circuit (alert: min_over_time open[2m] = 1 for > 60s wall time — use state history or separate alert rule)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 },
+      "id": 4,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "rate(ratelimiter_fallback_decisions_total[5m])",
+          "legendFormat": "fallback rps",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO: fallback rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 },
+      "id": 5,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "ratelimiter_error_budget_remaining",
+          "legendFormat": "in-process 1 - err/req",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO: error budget (process-wide gauge)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" } },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 14 },
+      "id": 6,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1 - (sum(increase(ratelimiter_slo_errors_total[28d])) / max(sum(increase(ratelimiter_slo_requests_total[28d])), 1))",
+          "legendFormat": "28d error budget (from counters)",
+          "refId": "A"
+        }
+      ],
+      "title": "SLO: error budget (28d, PromQL — use counters; \"43% budget remaining\" story)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 20 },
+      "id": 7,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "http_handler_requests_in_flight",
+          "refId": "A"
+        }
+      ],
+      "title": "promhttp: in-flight (InstrumentHandlerInFlight)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 20 },
+      "id": 8,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum(rate(http_handler_request_duration_seconds_bucket[5m])) by (le))",
+          "refId": "A"
+        }
+      ],
+      "title": "promhttp: HTTP handler p99 (unlabelled histogram)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["slo", "rate-limiter", "prometheus"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Rate Limiter SLO + promhttp",
+  "uid": "rate-limiter-slo",
+  "version": 1
+}
