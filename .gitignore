@@ -1,0 +1,4 @@
+# Local build caches (optional; created when GOCACHE/GOPATH are under the repo)
+.gocache/
+.gopath/
+.idea/
