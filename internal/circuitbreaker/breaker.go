@@ -53,6 +53,8 @@ type Route struct {
 // Breaker coordinates primary vs local traffic and records outcomes for tripping.
 // The FSM is stored in atomic.Value (lock-free read on the hot path).
 type Breaker struct {
+	// now, if set, is used instead of time.Now (tests; nil in production).
+	now  func() time.Time
 	fsm  atomic.Value // *fsmView
 	prob int32
 
@@ -77,9 +79,16 @@ func NewWithDefaults() *Breaker {
 	return b
 }
 
+func (b *Breaker) clock() time.Time {
+	if b != nil && b.now != nil {
+		return b.now()
+	}
+	return time.Now()
+}
+
 // Route returns the routing decision. Lock-free fsm read on the hot path.
 func (b *Breaker) Route() Route {
-	now := time.Now()
+	now := b.clock()
 	// 1) Closed: always primary
 	if snap := fsmGet(&b.fsm); snap != nil && snap.phase == StateClosed {
 		return Route{ToPrimary: true, IsProbe: false, Phase: StateClosed}
@@ -163,11 +172,11 @@ func (b *Breaker) FinishAfterPrimary(isProbe bool, success bool, d time.Duration
 	} else {
 		b.recentOK = pushBool(b.recentOK, false)
 	}
-	trimBefore := time.Now().Add(-latencyWindow)
+	trimBefore := b.clock().Add(-latencyWindow)
 	b.lat = append(b.lat, struct {
 		t time.Time
 		d time.Duration
-	}{t: time.Now(), d: d})
+	}{t: b.clock(), d: d})
 	var kept []struct {
 		t time.Time
 		d time.Duration
@@ -187,11 +196,11 @@ func (b *Breaker) FinishAfterPrimary(isProbe bool, success bool, d time.Duration
 	}
 
 	if reason, ok := shouldTripErrorRate(recent, minObservedRequests, tripErrorRateThreshold); ok {
-		b.tripOpen(reason, time.Now())
+		b.tripOpen(reason, b.clock())
 		return
 	}
 	if b.shouldTripP99() {
-		b.tripOpen("p99_latency>50ms", time.Now())
+		b.tripOpen("p99_latency>50ms", b.clock())
 	}
 }
 
@@ -223,7 +232,7 @@ func shouldTripErrorRate(recent []bool, minN int, maxErr float64) (string, bool)
 
 func (b *Breaker) shouldTripP99() bool {
 	b.mu.Lock()
-	now := time.Now()
+	now := b.clock()
 	cutoff := now.Add(-latencyWindow)
 	var durs []int64
 	for _, s := range b.lat {
@@ -299,7 +308,7 @@ func (b *Breaker) finishProbeOK() {
 
 func (b *Breaker) finishProbeFail(reason string, err error) {
 	atomic.StoreInt32(&b.prob, probeIdle)
-	at := time.Now()
+	at := b.clock()
 	for {
 		oldV := b.fsm.Load()
 		p, _ := oldV.(*fsmView)
