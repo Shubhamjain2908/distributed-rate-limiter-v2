@@ -1,0 +1,9 @@
+# Per-route cost (highest precedence for token weight). Key = "METHOD /path" (GET uppercased; path as served on the wire, e.g. /search/map).
+# Expensive work burns more of the per-client token bucket. Override by route before headers.
+#
+# X-Request-Cost is used when no route key matches. Legacy: X-Rate-Limit-Cost in middleware options.
+routes:
+  "GET /search/map": 10
+  "GET /search/basic": 1
+  "POST /booking": 5
+default: 1

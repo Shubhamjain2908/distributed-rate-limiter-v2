@@ -10,13 +10,18 @@ import (
 	"github.com/shubhamjain2908/distributed-rate-limiter-v2/internal/metrics"
 )
 
+// HeaderXRequestCost is the caller-provided per-request cost when no server route config matches.
+const HeaderXRequestCost = "X-Request-Cost"
+
 // Options configure how a client and cost are derived from a request.
 type Options struct {
 	// ClientIDHeader is checked first. Empty falls back to RemoteAddr (with host:port as the key).
 	ClientIDHeader string
-	// CostHeader optional; if missing, DefaultCost is used.
+	// CostHeader optional (e.g. X-Rate-Limit-Cost) when no route and no X-Request-Cost.
 	CostHeader  string
 	DefaultCost int
+	// RouteCost, if set, is checked first: exact "METHOD /path" from config/cost_config.yaml.
+	RouteCost *RouteCost
 }
 
 // Default options: stable client id header + optional request cost.
@@ -46,7 +51,7 @@ func RateLimit(lm limiter.Limiter, m *metrics.Registry, o ...func(*Options)) fun
 				m.IncSLORequest()
 			}
 			clientID := clientIDFromRequest(r, opts.ClientIDHeader)
-			cost := requestCost(r, &opts)
+			cost := ResolveCost(r, &opts)
 			res, err := lm.Allow(r.Context(), clientID, cost)
 			if err != nil {
 				if m != nil {
@@ -87,18 +92,4 @@ func clientIDFromRequest(r *http.Request, headerName string) string {
 		return strings.TrimSpace(h)
 	}
 	return r.RemoteAddr
-}
-
-func requestCost(r *http.Request, opts *Options) int {
-	if opts.CostHeader == "" {
-		return opts.DefaultCost
-	}
-	v := strings.TrimSpace(r.Header.Get(opts.CostHeader))
-	if v == "" {
-		return opts.DefaultCost
-	}
-	if n, err := strconv.Atoi(v); err == nil {
-		return n
-	}
-	return opts.DefaultCost
 }

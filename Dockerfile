@@ -11,5 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/rate-limiter ./cmd/server/main.go
 FROM alpine:latest
 WORKDIR /root/
 COPY --from=builder /app/rate-limiter .
+COPY --from=builder /app/config ./config
 EXPOSE 8080
+ENV COST_CONFIG_PATH=/root/config/cost_config.yaml
 CMD ["./rate-limiter"]

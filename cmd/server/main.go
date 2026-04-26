@@ -109,9 +109,30 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.Handle("GET /", prom.WrapWithPromHTTP(middleware.RateLimit(lim, prom)(hell)))
 
-	log.Printf("listening on %s (set X-Client-ID for a stable per-client key)", addr)
+	var routeCost *middleware.RouteCost
+	rc, err := middleware.LoadRouteCost(getenv("COST_CONFIG_PATH", "config/cost_config.yaml"))
+	if err != nil {
+		log.Fatalf("route cost config: %v", err)
+	}
+	if rc == nil {
+		log.Println("no cost_config file (COST_CONFIG_PATH), using headers + default cost only")
+	} else {
+		routeCost = rc
+		log.Println("loaded COST_CONFIG (route > X-Request-Cost > legacy cost header > default)")
+	}
+
+	chain := prom.WrapWithPromHTTP(middleware.RateLimit(lim, prom, func(o *middleware.Options) {
+		o.RouteCost = routeCost
+	})(hell))
+	// Register patterns so URL.Path in middleware matches config/cost_config.yaml keys.
+	for _, pat := range []string{
+		"GET /", "GET /search/map", "GET /search/basic", "POST /booking",
+	} {
+		mux.Handle(pat, chain)
+	}
+
+	log.Printf("listening on %s (set X-Client-ID for a stable per-client key; see config/cost_config.yaml)", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
