@@ -34,6 +34,12 @@ func (p *primaryThenLocal) Allow(ctx context.Context, clientID string, cost int)
 			return res, err
 		}
 		res.ViaFallback = true
+		if middleware.RequestLogEnabled() {
+			log.Printf(
+				"limiter: client=%q cost=%d route=local_to_primary=false phase=%s is_probe=%v (circuit: redis skipped)",
+				truncID(clientID, 128), cost, circuitStateName(r.Phase), r.IsProbe,
+			)
+		}
 		return res, nil
 	}
 	start := time.Now()
@@ -44,6 +50,12 @@ func (p *primaryThenLocal) Allow(ctx context.Context, clientID string, cost int)
 	}
 	p.b.FinishAfterPrimary(r.IsProbe, err == nil, elapsed)
 	if err != nil {
+		if middleware.RequestLogEnabled() {
+			log.Printf(
+				"limiter: client=%q cost=%d route=redis is_probe=%v primary_ms=%.3f err=%q → in-memory fallback",
+				truncID(clientID, 128), cost, r.IsProbe, elapsed.Seconds()*1000, err.Error(),
+			)
+		}
 		lr, lerr := p.local.Allow(ctx, clientID, cost)
 		if lerr != nil {
 			return lr, lerr
@@ -51,7 +63,21 @@ func (p *primaryThenLocal) Allow(ctx context.Context, clientID string, cost int)
 		lr.ViaFallback = true
 		return lr, nil
 	}
+	if middleware.RequestLogEnabled() {
+		log.Printf(
+			"limiter: client=%q cost=%d route=redis is_probe=%v primary_ms=%.3f allowed=%t remaining=%d",
+			truncID(clientID, 128), cost, r.IsProbe, elapsed.Seconds()*1000, res.Allowed, res.Remaining,
+		)
+	}
 	return res, nil
+}
+
+// truncID caps length for log lines; clientID is a quota key, not PII, but long values are hard to read.
+func truncID(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func main() {

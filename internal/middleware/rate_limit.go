@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shubhamjain2908/distributed-rate-limiter-v2/internal/limiter"
 	"github.com/shubhamjain2908/distributed-rate-limiter-v2/internal/metrics"
@@ -52,11 +53,14 @@ func RateLimit(lm limiter.Limiter, m *metrics.Registry, o ...func(*Options)) fun
 			}
 			clientID := clientIDFromRequest(r, opts.ClientIDHeader)
 			cost := ResolveCost(r, &opts)
+			t0 := time.Now()
 			res, err := lm.Allow(r.Context(), clientID, cost)
+			allowDur := time.Since(t0)
 			if err != nil {
 				if m != nil {
 					m.IncSLOError()
 				}
+				LogRateLimitDecision(r, clientID, cost, res, err, allowDur, http.StatusInternalServerError)
 				http.Error(w, "rate limiter error", http.StatusInternalServerError)
 				return
 			}
@@ -78,9 +82,11 @@ func RateLimit(lm limiter.Limiter, m *metrics.Registry, o ...func(*Options)) fun
 					}
 					w.Header().Set("Retry-After", strconv.FormatInt(sec, 10))
 				}
+				LogRateLimitDecision(r, clientID, cost, res, nil, allowDur, http.StatusTooManyRequests)
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
+			LogRateLimitDecision(r, clientID, cost, res, nil, allowDur, http.StatusOK)
 			next.ServeHTTP(w, r)
 		})
 	}

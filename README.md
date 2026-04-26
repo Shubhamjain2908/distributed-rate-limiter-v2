@@ -19,7 +19,7 @@ open http://localhost:3000   # Grafana: admin / admin
 open http://localhost:9090   # Prometheus
 ```
 
-The server uses `COST_CONFIG_PATH` (default `config/cost_config.yaml`) to price routes; per-request overrides: `X-Request-Cost`, `X-Rate-Limit-Cost`, and `X-Client-ID` as the limiter key.
+The server uses `COST_CONFIG_PATH` (default `config/cost_config.yaml`) to price routes; per-request overrides: `X-Request-Cost`, `X-Rate-Limit-Cost`, and `X-Client-ID` as the limiter key. **Per-request logs** (default **on**): one `http` line in middleware (method, path, `client_id`, `cost`, allow result, `allow` latency, status) and, with Redis+composite, a `limiter` line (circuit / Redis / fallback). Set `LOG_REQUESTS=0` (or `false`/`off`) to disable.
 
 ### Load testing (Grafana + Prometheus)
 
