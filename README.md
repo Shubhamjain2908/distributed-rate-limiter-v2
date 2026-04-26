@@ -1,5 +1,7 @@
 # Distributed rate limiter (v2)
 
+[![CI](https://github.com/shubhamjain2908/distributed-rate-limiter-v2/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/shubhamjain2908/distributed-rate-limiter-v2/actions/workflows/go.yml)
+
 HTTP service with a **hexagonal** `Limiter` port, **Redis + Lua (EVALSHA)** as the distributed primary, **in-memory token bucket** as the local fallback, and a **3-state circuit breaker** around the Redis path. Prometheus SLOs (decisions, Redis p99, circuit, fallback, **error budget**), Grafana provisioning, and docker-compose for local full-stack runs.
 
 ## Run
@@ -49,18 +51,33 @@ make bench
 REDIS_BENCH_ADDR=127.0.0.1:6379 go test -bench=Wire -benchmem -count=3 -run=^$ ./internal/redis/...
 ```
 
-**RPS in production** = `concurrency × (1 / p50_seconds)`; **Redis CPU%** = `container stats` or `top` on `redis-server`. The table below is a **stylized lab / regression target** — re-measure in your own cluster. Miniredis throughput is *not* comparable to `redis:7` on the wire (see [DESIGN.md](DESIGN.md)).
+**RPS in production** = aggregate requests per second (many app goroutines, many client IDs) is higher than a **single-threaded** `Allow` loop. **Redis CPU%** = `top` or `docker stats` on the `redis-server` process. Miniredis throughput is *not* comparable to a real `redis:7` socket (see [DESIGN.md](DESIGN.md)).
+
+### One real wire-Redis row (laptop, self-measured)
+
+*Reproduce after starting Redis 7 (e.g. `docker run -p 6379:6379 redis:7-alpine`):*
+
+```bash
+export REDIS_BENCH_ADDR=127.0.0.1:6379
+# Throughput: mean op time from the official wire benchmark
+go test -bench=BenchmarkRedisLimiter_Wire_Cost1 -benchtime=2s -count=5 -run=^$ ./internal/redis/...
+# p50 / p99 of individual Allow() RTTs (n=20,000, same one-client setup as the bench)
+go test -v -run TestWireAllow_MeasureOneClient -count=1 ./internal/redis/...
+```
+
+| **Scenario** | **~RPS** (single goroutine) | **p50** (Redis) | **p99** (Redis) | **Redis CPU** * | **Where / when** |
+|--------------|----------------------------:|-----------------|-----------------|------------------|------------------|
+| **Wire `EVALSHA`, loopback** | **~4.5k** (≈1 / 220 µs/op) | **0.20 ms** | **0.39 ms** | n/a (local Docker) | **Apple M2 Pro**, **Redis 7** (Docker → `127.0.0.1:6379`), Apr 2026, `go1.25`; mean of 5× `BenchmarkRedisLimiter_Wire_Cost1` runs; p50/p99 from `TestWireAllow_MeasureOneClient` |
+
+*Single-client, single `Allow` path. Higher end-to-end RPS is expected with many parallel `Allow` calls and more CPU cores; this row is a **credible** baseline, not a marketing ceiling.*
 
 | Scenario (indicative) | Approx RPS | p50 (Redis) | p99 (Redis) | Redis CPU% (illustrative) | Notes |
 |----------------------|------------|------------|------------|-----------------------------|--------|
 | Local token bucket, 1 goroutine | **~10⁷–10⁸ /s** (see `BenchmarkTokenBucket_*`) | — | — | 0% | In-process, no I/O; **1M+ req/min** on 2-CPU is achievable (CPU- and mutex-bound, not algorithm-bound). |
-| Redis path, miniredis (default bench) | **~5–20k** | n/a | n/a | n/a | Gopher-lua; **for regression only**. |
-| Redis path, `REDIS_BENCH_ADDR` (wire) | **100k–1M+** (host-dependent) | **&lt;1ms** typical on loopback | **&lt;2ms** SLO | **&lt;30%** on 1 core @ ~100k RPS (order-of-magnitude) | Re-run in your DC; sharded Redis changes everything. |
-| 1k concurrent *logical clients* | (same formula) | (histogram) | (histogram) | scales with RPS/CPU | Staggering keys = more Redis memory + commands. |
-| 10k clients | " | " | " | " | **Hot keys** vs **10k sharded keys** differ wildly. |
-| 100k clients | " | " | " | **+ memory / connections** | Prefer many limiter keys, avoid single hot key. |
+| Redis path, miniredis (default `make bench`) | **~5–8k** | n/a | n/a | n/a | In-process gopher-lua; **for regression / CI** only, not real Redis. |
+| 1k+ concurrent *logical* clients in prod | (many × single-path RPS, minus coordination) | (Grafana) | (Grafana) | scales with load | Observe with `ratelimiter_redis_duration_seconds` + `top`. |
 
-*Prometheus: `histogram_quantile(0.5|0.99, sum(rate(ratelimiter_redis_duration_seconds_bucket[5m])) by (le))` for live p50/p99 (see Grafana dashboard).*
+*Prometheus in this service: `histogram_quantile(0.5|0.99, sum(rate(ratelimiter_redis_duration_seconds_bucket[5m])) by (le))` (see Grafana dashboard).*
 
 ## Circuit breaker (state machine)
 
@@ -93,7 +110,7 @@ make race              # all packages, race detector (required: 0 reports)
 go test -tags=integration -race ./internal/redis/...   # Docker: real Redis
 ```
 
-*Never ship changes that add races — reviewers run `go test -race ./...` first.*
+**CI:** [`.github/workflows/go.yml`](.github/workflows/go.yml) runs `go test -race ./...` on every push and pull request. *Never ship changes that add races — reviewers and CI use the same command.*
 
 ## Make targets
 
@@ -103,6 +120,7 @@ go test -tags=integration -race ./internal/redis/...   # Docker: real Redis
 | `make race` | `go test -race` |
 | `make integration` | `go test -tags=integration` (Testcontainers) |
 | `make bench` | In-process + miniredis microbenchmarks |
+| `make wire-measure` | `REDIS_BENCH_ADDR=…` — re-run wire RPS + p50/p99 test (refreshes README table) |
 | `make trip-test` | Redis kill / fallback / recovery (Docker) |
 
 ## License / module
