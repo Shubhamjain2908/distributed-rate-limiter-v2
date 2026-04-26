@@ -2,16 +2,23 @@ package limiter
 
 import "context"
 
-// LimitResult holds the outcome of a rate limit check.
+// Known Algorithm values for LimitResult.Algorithm (for metrics, logs, and tests).
+const (
+	AlgorithmTokenBucket   = "token_bucket"
+	AlgorithmSlidingWindow = "sliding_window"
+	AlgorithmRedis         = "redis"
+	AlgorithmInMemory      = "in_memory"
+)
+
+// LimitResult is the port-level outcome of Allow (hexagonal: adapters return this, apps interpret it).
 type LimitResult struct {
 	Allowed      bool
 	Remaining    int
 	RetryAfterMs int64
-	Algorithm    string // "token_bucket" | "sliding_window"
+	Algorithm    string // e.g. AlgorithmTokenBucket, AlgorithmSlidingWindow
 }
 
-// Limiter is the interface that makes everything testable.
-// Both the Redis adapter and the local fallback will implement this.
+// Limiter is the testable port: all adapters (Redis, in-memory, composite) implement this.
 type Limiter interface {
 	Allow(ctx context.Context, clientID string, cost int) (LimitResult, error)
 }
