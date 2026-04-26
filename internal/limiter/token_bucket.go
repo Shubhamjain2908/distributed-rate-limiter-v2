@@ -46,6 +46,14 @@ func (t *TokenBucket) WithSanitizeKey(fn func(string) string) *TokenBucket {
 	return t
 }
 
+// WithClock sets the wall clock (optional). Defaults to time.Now. Useful for tests and microbenchmarks.
+func (t *TokenBucket) WithClock(clock func() time.Time) *TokenBucket {
+	if clock != nil {
+		t.clock = clock
+	}
+	return t
+}
+
 func defaultSanitize(s string) string {
 	if s == "" {
 		return "anonymous"
