@@ -1,4 +1,4 @@
-.PHONY: test race bench wire-measure integration trip-test
+.PHONY: test race bench wire-measure integration load trip-test
 
 # Unit + integration coverage for default CI (no integration tag, no docker for integration)
 test:
@@ -10,6 +10,10 @@ race:
 # Docker required
 integration:
 	go test -tags=integration -race ./...
+
+# HTTP load → Grafana/Prometheus (needs app on 8080, e.g. docker compose)
+load:
+	bash ./scripts/loadtest.sh
 
 # Microbenchmarks (miniredis + in-process token bucket; wire-Redis: see README)
 bench:

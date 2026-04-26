@@ -21,6 +21,30 @@ open http://localhost:9090   # Prometheus
 
 The server uses `COST_CONFIG_PATH` (default `config/cost_config.yaml`) to price routes; per-request overrides: `X-Request-Cost`, `X-Rate-Limit-Cost`, and `X-Client-ID` as the limiter key.
 
+### Load testing (Grafana + Prometheus)
+
+**Single request (compose default `8080:8080`, `X-Client-ID` per-client bucket):**
+
+```bash
+curl -sS -D- -H 'X-Client-ID: my-client' 'http://127.0.0.1:8080/' -o /dev/null | head
+```
+
+**Sustained traffic:**
+
+```bash
+./scripts/loadtest.sh
+# optional:  ./scripts/loadtest.sh 'http://127.0.0.1:8080' 50 20000
+```
+
+**Heavier load (e.g. [hey](https://github.com/rakyll/hey)):**
+
+```bash
+go install github.com/rakyll/hey@latest
+hey -n 200000 -c 80 -H 'X-Client-ID: demo' 'http://127.0.0.1:8080/'
+```
+
+Prometheus scrapes `/metrics` every **5s** (`prometheus.yml`). In Grafana, the **28d** error-budget query uses a long `increase()` window on counters; **`ratelimiter_error_budget_remaining`** (process-lifetime) updates immediately from the same app process.
+
 ## Target SLOs (the numbers we build toward)
 
 | Target | Value |
