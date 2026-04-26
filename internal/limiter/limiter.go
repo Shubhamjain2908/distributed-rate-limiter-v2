@@ -15,7 +15,9 @@ type LimitResult struct {
 	Allowed      bool
 	Remaining    int
 	RetryAfterMs int64
-	Algorithm    string // e.g. AlgorithmTokenBucket, AlgorithmSlidingWindow
+	Algorithm    string // e.g. AlgorithmTokenBucket, AlgorithmSlidingWindow, AlgorithmRedis, AlgorithmInMemory
+	// ViaFallback is set when the decision is produced by the local/backup path (circuit open, or Redis error after composite tries primary).
+	ViaFallback bool
 }
 
 // Limiter is the testable port: all adapters (Redis, in-memory, composite) implement this.

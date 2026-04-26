@@ -22,19 +22,34 @@ type primaryThenLocal struct {
 	b       *circuitbreaker.Breaker
 	primary *redislim.RedisLimiter
 	local   *fallback.LocalLimiter
+	m       *metrics.Registry
 }
 
 func (p *primaryThenLocal) Allow(ctx context.Context, clientID string, cost int) (limiter.LimitResult, error) {
 	r := p.b.Route()
 	if !r.ToPrimary {
 		// Open: only local, zero Redis. Half-Open: non-probe goroutines also use local.
-		return p.local.Allow(ctx, clientID, cost)
+		res, err := p.local.Allow(ctx, clientID, cost)
+		if err != nil {
+			return res, err
+		}
+		res.ViaFallback = true
+		return res, nil
 	}
 	start := time.Now()
 	res, err := p.primary.Allow(ctx, clientID, cost)
-	p.b.FinishAfterPrimary(r.IsProbe, err == nil, time.Since(start))
+	elapsed := time.Since(start)
+	if p.m != nil {
+		p.m.ObserveRedis(elapsed.Seconds())
+	}
+	p.b.FinishAfterPrimary(r.IsProbe, err == nil, elapsed)
 	if err != nil {
-		return p.local.Allow(ctx, clientID, cost)
+		lr, lerr := p.local.Allow(ctx, clientID, cost)
+		if lerr != nil {
+			return lr, lerr
+		}
+		lr.ViaFallback = true
+		return lr, nil
 	}
 	return res, nil
 }
@@ -48,6 +63,7 @@ func main() {
 	const perSec = 10.0
 
 	prom := metrics.New()
+	prom.SetCircuitGauges("closed") // default until a composite loop updates (all-closed = healthy)
 
 	var lim limiter.Limiter
 	if redisAddr != "" {
@@ -68,11 +84,14 @@ func main() {
 			} else {
 				log.Println("using Redis (EVALSHA) as primary, local in-memory as fallback, circuit breaker around Redis")
 				loc := fallback.NewLocalLimiter(burst, perSec)
-				lim = &primaryThenLocal{
+				pl := &primaryThenLocal{
 					b:       circuitbreaker.NewWithDefaults(),
 					primary: rl,
 					local:   loc,
+					m:       prom,
 				}
+				lim = pl
+				go runCircuitGauges(prom, pl)
 			}
 		}
 	} else {
@@ -90,7 +109,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.Handle("GET /", middleware.RateLimit(lim, prom)(hell))
+	mux.Handle("GET /", prom.WrapWithPromHTTP(middleware.RateLimit(lim, prom)(hell)))
 
 	log.Printf("listening on %s (set X-Client-ID for a stable per-client key)", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -103,4 +122,26 @@ func getenv(k, d string) string {
 		return v
 	}
 	return d
+}
+
+func runCircuitGauges(m *metrics.Registry, p *primaryThenLocal) {
+	if m == nil {
+		return
+	}
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		m.SetCircuitGauges(circuitStateName(p.b.Snapshot()))
+	}
+}
+
+func circuitStateName(s circuitbreaker.State) string {
+	switch s {
+	case circuitbreaker.StateOpen:
+		return "open"
+	case circuitbreaker.StateHalfOpen:
+		return "half_open"
+	default:
+		return "closed"
+	}
 }

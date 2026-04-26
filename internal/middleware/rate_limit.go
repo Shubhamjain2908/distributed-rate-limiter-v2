@@ -12,7 +12,7 @@ import (
 
 // Options configure how a client and cost are derived from a request.
 type Options struct {
-	// ClientIDHeader is checked first. Empty falls back to RemoteAddr (with host:port as key).
+	// ClientIDHeader is checked first. Empty falls back to RemoteAddr (with host:port as the key).
 	ClientIDHeader string
 	// CostHeader optional; if missing, DefaultCost is used.
 	CostHeader  string
@@ -42,20 +42,30 @@ func RateLimit(lm limiter.Limiter, m *metrics.Registry, o ...func(*Options)) fun
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m != nil {
+				m.IncSLORequest()
+			}
 			clientID := clientIDFromRequest(r, opts.ClientIDHeader)
 			cost := requestCost(r, &opts)
 			res, err := lm.Allow(r.Context(), clientID, cost)
 			if err != nil {
-				m.ErrorsTotal.Inc()
+				if m != nil {
+					m.IncSLOError()
+				}
 				http.Error(w, "rate limiter error", http.StatusInternalServerError)
 				return
+			}
+			if m != nil {
+				if res.ViaFallback {
+					m.IncFallback()
+				}
+				m.IncDecision(res.Allowed, res.ViaFallback, res.Algorithm)
 			}
 			w.Header().Set("X-Rate-Limit-Remaining", strconv.Itoa(res.Remaining))
 			if res.Algorithm != "" {
 				w.Header().Set("X-Rate-Limit-Algorithm", res.Algorithm)
 			}
 			if !res.Allowed {
-				m.RejectedTotal.Inc()
 				if res.RetryAfterMs > 0 {
 					sec := (res.RetryAfterMs + 999) / 1000
 					if sec < 1 {
@@ -66,7 +76,6 @@ func RateLimit(lm limiter.Limiter, m *metrics.Registry, o ...func(*Options)) fun
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
-			m.AllowedTotal.Inc()
 			next.ServeHTTP(w, r)
 		})
 	}
