@@ -1,19 +1,46 @@
 version: "3.9"
 
 services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_ADDR: redis:6379
+      SERVER_ADDR: ":8080"
+    depends_on:
+      - redis
+
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
 
-  server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      REDIS_ADDR: redis:6379
-      SERVER_ADDR: :8080
+  prometheus:
+    image: prom/prometheus:v2.54.0
     ports:
-      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
     depends_on:
-      - redis
+      - app
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # [dashboards] default_home_dashboard_path — loaded JSON on first login
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/slo-dashboard.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

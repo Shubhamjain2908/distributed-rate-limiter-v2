@@ -1,0 +1,13 @@
+# Loads JSON from /var/lib/grafana/dashboards (see docker-compose mount).
+apiVersion: 1
+providers:
+  - name: SLO
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
